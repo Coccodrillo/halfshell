@@ -61,6 +61,13 @@ func (ip *imageProcessor) ProcessImage(image *Image, request *ImageProcessorOpti
 	defer wand.Destroy()
 
 	wand.ReadImageBlob(image.Bytes)
+
+	err, cropModified := ip.cropWand(wand, request)
+	if err != nil {
+		ip.Logger.Warn("Error cropping image: %s", err)
+		return nil
+	}
+
 	err, scaleModified := ip.scaleWand(wand, request)
 	if err != nil {
 		ip.Logger.Warn("Error scaling image: %s", err)
@@ -73,7 +80,7 @@ func (ip *imageProcessor) ProcessImage(image *Image, request *ImageProcessorOpti
 		return nil
 	}
 
-	if !scaleModified && !blurModified {
+	if !cropModified && !scaleModified && !blurModified {
 		processedImage.Bytes = image.Bytes
 	} else {
 		processedImage.Bytes = wand.GetImageBlob()
@@ -124,6 +131,34 @@ func (ip *imageProcessor) scaleWand(wand *imagick.MagickWand, request *ImageProc
 		}
 	}
 
+	return nil, true
+}
+
+func (ip *imageProcessor) cropWand(wand *imagick.MagickWand, request *ImageProcessorOptions) (err error, modified bool) {
+	currentDimensions := ImageDimensions{uint64(wand.GetImageWidth()), uint64(wand.GetImageHeight())}
+	if currentDimensions.AspectRatio() == request.Dimensions.AspectRatio() || ip.Config.MaintainAspectRatio {
+		return nil, false
+	}
+
+	var cropWidth, cropHeight uint64
+	var cropLeft, cropTop int // crop offsets
+	if currentDimensions.AspectRatio() > request.Dimensions.AspectRatio() {
+		// Image is wider than requested dimensions so we'll
+		// crop the width to match requested aspect.
+		cropWidth = ip.getAspectScaledWidth(request.Dimensions.AspectRatio(), currentDimensions.Height)
+		cropHeight = currentDimensions.Height
+		// Shift crop frame from the left
+		cropLeft = int(math.Floor(0.5 + (float64(currentDimensions.Width-cropWidth) * (request.Dimensions.AspectRatio() / currentDimensions.AspectRatio()))))
+	} else {
+		cropWidth = currentDimensions.Width
+		cropHeight = ip.getAspectScaledHeight(request.Dimensions.AspectRatio(), currentDimensions.Width)
+		cropTop = int(math.Floor(0.0 + (float64(currentDimensions.Height-cropHeight) * (currentDimensions.AspectRatio() / request.Dimensions.AspectRatio()))))
+	}
+
+	if err = wand.CropImage(uint(cropWidth), uint(cropHeight), cropLeft, cropTop); err != nil {
+		ip.Logger.Warn("ImageMagick error cropping image: %s", err)
+		return err, true
+	}
 	return nil, true
 }
 
