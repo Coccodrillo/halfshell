@@ -22,7 +22,7 @@ package main
 
 import (
 	"fmt"
-	"github.com/oysterbooks/halfshell/halfshell"
+	"github.com/coccodrillo/halfshell/halfshell"
 	"os"
 )
 

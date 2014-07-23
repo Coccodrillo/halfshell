@@ -31,6 +31,7 @@ type Server struct {
 	*http.Server
 	Routes []*Route
 	Logger *Logger
+	Cache  *Cache
 }
 
 func NewServerWithConfigAndRoutes(config *ServerConfig, routes []*Route) *Server {
@@ -40,7 +41,8 @@ func NewServerWithConfigAndRoutes(config *ServerConfig, routes []*Route) *Server
 		WriteTimeout:   time.Duration(config.WriteTimeout) * time.Second,
 		MaxHeaderBytes: 1 << 20,
 	}
-	server := &Server{httpServer, routes, NewLogger("server")}
+	cache := NewCacheWithConfig(config)
+	server := &Server{httpServer, routes, NewLogger("server"), cache}
 	httpServer.Handler = server
 	return server
 }
@@ -69,23 +71,30 @@ func (s *Server) ImageRequestHandler(w *HalfshellResponseWriter, r *HalfshellReq
 	s.Logger.Info("Handling request for image %s with dimensions %v",
 		r.SourceOptions.Path, r.ProcessorOptions.Dimensions)
 
-	image := r.Route.Source.GetImage(r.SourceOptions)
-	if image == nil {
-		w.WriteError("Not Found", http.StatusNotFound)
-		return
+	cachedImage := s.Cache.getImage(r.SourceOptions.Path, r.ProcessorOptions.Dimensions)
+
+	if cachedImage != nil {
+		w.WriteImage(cachedImage)
+	} else {
+		image := r.Route.Source.GetImage(r.SourceOptions)
+		if image == nil {
+			w.WriteError("Not Found", http.StatusNotFound)
+			return
+		} else {
+			processedImage := r.Route.Processor.ProcessImage(image, r.ProcessorOptions)
+			if processedImage == nil {
+				s.Logger.Warn("Error processing image data %s to dimensions: %v",
+					r.ProcessorOptions.Dimensions)
+				w.WriteError("Internal Server Error", http.StatusNotFound)
+				return
+			}
+			s.Logger.Info("Returning resized image %s to dimensions %v",
+				r.SourceOptions.Path, r.ProcessorOptions.Dimensions)
+			go s.Cache.write(r.SourceOptions.Path, r.ProcessorOptions.Dimensions, processedImage.Bytes)
+			w.WriteImage(processedImage)
+		}
 	}
 
-	processedImage := r.Route.Processor.ProcessImage(image, r.ProcessorOptions)
-	if processedImage == nil {
-		s.Logger.Warn("Error processing image data %s to dimensions: %v",
-			r.ProcessorOptions.Dimensions)
-		w.WriteError("Internal Server Error", http.StatusNotFound)
-		return
-	}
-
-	s.Logger.Info("Returning resized image %s to dimensions %v",
-		r.SourceOptions.Path, r.ProcessorOptions.Dimensions)
-	w.WriteImage(processedImage)
 }
 
 func (s *Server) LogRequest(w *HalfshellResponseWriter, r *HalfshellRequest) {

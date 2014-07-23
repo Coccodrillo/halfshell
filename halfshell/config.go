@@ -41,6 +41,9 @@ type ServerConfig struct {
 	Port         uint64
 	ReadTimeout  uint64
 	WriteTimeout uint64
+	CacheEnabled bool
+	CacheFolder  string
+	CacheMaxSize uint64
 }
 
 // RouteConfig holds the configuration settings for a particular route.
@@ -152,6 +155,9 @@ func (c *configParser) parseServerConfig() *ServerConfig {
 		Port:         c.uintForKeypath("server.port"),
 		ReadTimeout:  c.uintForKeypath("server.read_timeout"),
 		WriteTimeout: c.uintForKeypath("server.write_timeout"),
+		CacheEnabled: c.boolForKeypath("server.cache_enabled"),
+		CacheFolder:  c.stringForKeypath("server.cache_directory"),
+		CacheMaxSize: c.uintForKeypath("server.cache_max_size"),
 	}
 }
 
